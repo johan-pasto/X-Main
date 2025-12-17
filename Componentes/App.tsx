@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { enableScreens } from 'react-native-screens';
 
 import { AuthProvider } from '../context/AuthContext';
@@ -10,9 +10,13 @@ import Registro from './Registro';
 import Tablero from '../Page/Tablero';
 import Profile from '../Page/Profile';
 
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
+
+
 enableScreens();
 
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 export default function App() {
   return (
@@ -23,6 +27,9 @@ export default function App() {
           <Stack.Screen name="Registro" component={Registro} />
           <Stack.Screen name="Tablero" component={Tablero} />
           <Stack.Screen name="Profile" component={Profile} />
+          <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* tu navegación o componentes */}
+    </GestureHandlerRootView>
         </Stack.Navigator>
       </NavigationContainer>
     </AuthProvider>

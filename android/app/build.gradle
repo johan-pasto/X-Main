@@ -113,6 +113,7 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation platform("com.google.firebase:firebase-bom:33.1.2")
     implementation "com.google.firebase:firebase-messaging"
+    implementation project(':react-native-gesture-handler')
 
 
     if (hermesEnabled.toBoolean()) {

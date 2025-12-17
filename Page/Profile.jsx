@@ -10,8 +10,9 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
-  SafeAreaView
+  RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import { getUserProfile, getUserTweets, updateProfile } from '../services/userService';
 import TweetCard from './TweetCard';
@@ -31,83 +32,107 @@ function Profile({ route, navigation }) {
     avatar_url: '', 
     name: '' 
   });
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [tempAvatarUrl, setTempAvatarUrl] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    console.log('🎯 Profile montado con:');
-    console.log('• userId:', userId);
-    console.log('• initialUserData:', initialUserData);
-    console.log('• currentUser:', currentUser);
-
-    const fetchProfileData = async () => {
+  // Función para cargar datos del perfil
+  const loadProfileData = async (forceRefresh = false) => {
+    if (forceRefresh) {
+      setRefreshing(true);
+    } else {
       setLoading(true);
-      try {
-        // Si ya tenemos datos iniciales del usuario, usarlos
-        if (initialUserData && initialUserData.id === userId) {
-          console.log('✅ Usando datos iniciales del usuario');
-          setProfile(initialUserData);
-          
-          // Solo buscar tweets si no los tenemos
-          if (!tweets.length) {
-            const tweetsRes = await getUserTweets(userId);
-            console.log('✅ Tweets cargados:', tweetsRes.length);
-            setTweets(tweetsRes);
-          }
-          
-          setEditForm({ 
-            bio: initialUserData.bio || '', 
-            avatar_url: initialUserData.avatar_url || '',
-            name: initialUserData.name || initialUserData.username || ''
-          });
-        } else if (userId) {
-          // Si solo tenemos el ID, buscar todo
-          console.log('🔍 Buscando perfil desde API...');
-          const [userRes, tweetsRes] = await Promise.all([
-            getUserProfile(userId),
-            getUserTweets(userId)
-          ]);
-          
-          console.log('✅ Perfil cargado:', userRes);
-          console.log('✅ Tweets cargados:', tweetsRes.length);
-          
-          setProfile(userRes);
-          setTweets(tweetsRes);
-          
-          setEditForm({ 
-            bio: userRes.bio || '', 
-            avatar_url: userRes.avatar_url || '',
-            name: userRes.name || userRes.username || ''
-          });
-        } else {
-          console.error('❌ No se proporcionó userId');
-          Alert.alert('Error', 'No se proporcionó ID de usuario');
-          navigation.goBack();
-          return;
-        }
-      } catch (error) {
-        console.error("❌ Error cargando perfil:", error);
-        Alert.alert('Error', 'No se pudo cargar el perfil del usuario');
+    }
+    
+    try {
+      console.log('🔄 Cargando datos del perfil...');
+      
+      // Si tenemos datos iniciales y no forzamos refresh, usarlos
+      if (initialUserData && initialUserData.id === userId && !forceRefresh) {
+        console.log('✅ Usando datos iniciales del usuario');
+        setProfile(initialUserData);
+        setEditForm({ 
+          bio: initialUserData.bio || '', 
+          avatar_url: initialUserData.avatar_url || '',
+          name: initialUserData.nombre || initialUserData.name || initialUserData.username || ''
+        });
+      } else if (userId) {
+        // Siempre cargar del backend para datos frescos
+        console.log('🔍 Buscando perfil desde API...');
+        const [userRes, tweetsRes] = await Promise.all([
+          getUserProfile(userId),
+          getUserTweets(userId)
+        ]);
         
-        // Si hay error pero tenemos datos iniciales, usarlos
-        if (initialUserData) {
-          console.log('⚠️ Usando datos iniciales debido a error');
-          setProfile(initialUserData);
-          setEditForm({ 
-            bio: initialUserData.bio || '', 
-            avatar_url: initialUserData.avatar_url || '',
-            name: initialUserData.name || initialUserData.username || ''
-          });
-        }
-      } finally {
-        setLoading(false);
+        console.log('✅ Perfil cargado:', {
+          id: userRes.id,
+          nombre: userRes.nombre || userRes.name,
+          bio: userRes.bio,
+          avatar_url: userRes.avatar_url
+        });
+        
+        setProfile(userRes);
+        setTweets(tweetsRes);
+        
+        setEditForm({ 
+          bio: userRes.bio || '', 
+          avatar_url: userRes.avatar_url || '',
+          name: userRes.nombre || userRes.name || userRes.username || ''
+        });
+      } else {
+        console.error('❌ No se proporcionó userId');
+        Alert.alert('Error', 'No se proporcionó ID de usuario');
+        navigation.goBack();
+        return;
       }
-    };
+    } catch (error) {
+      console.error("❌ Error cargando perfil:", error);
+      
+      // Si hay error pero tenemos datos iniciales, usarlos
+      if (initialUserData && !forceRefresh) {
+        console.log('⚠️ Usando datos iniciales debido a error');
+        setProfile(initialUserData);
+        setEditForm({ 
+          bio: initialUserData.bio || '', 
+          avatar_url: initialUserData.avatar_url || '',
+          name: initialUserData.nombre || initialUserData.name || initialUserData.username || ''
+        });
+      } else {
+        Alert.alert('Error', 'No se pudo cargar el perfil del usuario');
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
-    fetchProfileData();
+  // Cargar datos al montar el componente
+  useEffect(() => {
+    console.log('🎯 Profile montado con userId:', userId);
+    loadProfileData();
   }, [userId]);
+
+  // Recargar cuando la pantalla obtiene foco
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('🔍 Pantalla Profile enfocada - Recargando datos');
+      loadProfileData(true); // Forzar recarga
+    });
+
+    return unsubscribe;
+  }, [navigation, userId]);
 
   const handleEditSubmit = async () => {
     try {
-      // Validaciones básicas
+      console.log('=== 🔍 DEBUG UPDATE ===');
+      console.log('1. userId:', userId);
+      console.log('2. currentUser.id:', currentUser?.id);
+      console.log('3. profile.id:', profile?.id);
+      console.log('4. token disponible:', !!token);
+      console.log('5. editForm:', editForm);
+      console.log('=== 🔍 FIN DEBUG ===');
+
       if (!token) {
         Alert.alert('Error', 'Debes iniciar sesión para editar tu perfil');
         return;
@@ -118,16 +143,43 @@ function Profile({ route, navigation }) {
         return;
       }
 
-      console.log('✏️ Actualizando perfil con:', editForm);
+      console.log('✏️ Llamando a updateProfile...');
       
-      // Llamar al servicio con token
+      // Enviar actualización al backend
       const updatedProfile = await updateProfile(userId, editForm, token);
-      setProfile({ ...profile, ...updatedProfile });
+      
+      console.log('✅ Respuesta de updateProfile:', updatedProfile);
+      
+      // Actualizar el estado local con los datos del backend
+      setProfile(prev => ({
+        ...prev,
+        bio: updatedProfile.bio || editForm.bio,
+        avatar_url: updatedProfile.avatar_url || editForm.avatar_url,
+        nombre: updatedProfile.nombre || editForm.name || prev.nombre,
+        name: updatedProfile.nombre || editForm.name || prev.name
+      }));
+      
       setIsEditing(false);
+      
+      // Recargar datos frescos del backend después de actualizar
+      setTimeout(() => {
+        loadProfileData(true);
+      }, 500);
+      
       Alert.alert('Éxito', 'Perfil actualizado correctamente');
+      
     } catch (error) {
-      console.error("❌ Error actualizando perfil:", error);
-      Alert.alert('Error', error.message || "No se pudo actualizar el perfil");
+      console.error("❌ Error actualizando perfil:", {
+        message: error.message,
+        status: error.status,
+        requiresReauth: error.requiresReauth
+      });
+      
+      if (error.requiresReauth) {
+        Alert.alert('Sesión expirada', 'Tu sesión ha expirado. Vuelve a iniciar sesión.');
+      } else {
+        Alert.alert('Error', error.message || "No se pudo actualizar el perfil");
+      }
     }
   };
 
@@ -147,6 +199,11 @@ function Profile({ route, navigation }) {
     } catch (error) {
       return dateString;
     }
+  };
+
+  // Función para recargar manualmente
+  const handleRefresh = () => {
+    loadProfileData(true);
   };
 
   if (loading) {
@@ -177,7 +234,7 @@ function Profile({ route, navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
+      {/* Header con botón de refresh */}
       <View style={styles.header}>
         <TouchableOpacity 
           onPress={() => navigation.goBack()}
@@ -187,16 +244,30 @@ function Profile({ route, navigation }) {
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>{profile.name || profile.username}</Text>
+          <Text style={styles.headerTitle}>{profile.nombre || profile.name || profile.username}</Text>
           <Text style={styles.headerSubtitle}>{tweets.length} tweets</Text>
         </View>
         
-        <View style={styles.headerRight} />
+        <TouchableOpacity onPress={handleRefresh} disabled={refreshing}>
+          {refreshing ? (
+            <ActivityIndicator size="small" color="#1d9bf0" />
+          ) : (
+            <Icon name="refresh-cw" size={20} color="#1d9bf0" />
+          )}
+        </TouchableOpacity>
       </View>
 
       <ScrollView 
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#1d9bf0']}
+            tintColor="#1d9bf0"
+          />
+        }
       >
         {/* Profile Info */}
         <View style={styles.profileInfo}>
@@ -227,14 +298,16 @@ function Profile({ route, navigation }) {
           {/* Nombre y username */}
           <View style={styles.nameContainer}>
             <Text style={styles.name}>
-              {profile.name || profile.username}
+              {profile.nombre || profile.name || profile.username}
             </Text>
             <Text style={styles.username}>@{profile.username}</Text>
           </View>
           
           {/* Bio */}
-          {profile.bio && (
+          {profile.bio ? (
             <Text style={styles.bio}>{profile.bio}</Text>
+          ) : (
+            <Text style={styles.noBio}>No hay biografía</Text>
           )}
           
           {/* Info adicional */}
@@ -360,6 +433,18 @@ function Profile({ route, navigation }) {
                   placeholder="https://ejemplo.com/tu-avatar.jpg"
                   placeholderTextColor="#657786"
                 />
+                <View style={{flexDirection: 'row', marginTop: 8}}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, {marginRight: 8, backgroundColor: '#eee'}]}
+                    onPress={() => {
+                      // Abrir modal para pegar URL
+                      setTempAvatarUrl(editForm.avatar_url || '');
+                      setShowUrlModal(true);
+                    }}
+                  >
+                    <Text style={{color:'#333'}}>Pegar URL</Text>
+                  </TouchableOpacity>
+                </View>
                 {editForm.avatar_url ? (
                   <View style={styles.avatarPreview}>
                     <Text style={styles.previewText}>Vista previa:</Text>
@@ -373,6 +458,40 @@ function Profile({ route, navigation }) {
                   </View>
                 ) : null}
               </View>
+
+              {/* Modal para pegar URL */}
+              <Modal visible={showUrlModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                  <View style={[styles.modalContainer, {maxHeight: 260}]}> 
+                    <View style={styles.modalHeader}>
+                      <Text style={styles.modalTitle}>Pegar URL de avatar</Text>
+                      <TouchableOpacity onPress={() => setShowUrlModal(false)} style={styles.modalCloseButton}>
+                        <Icon name="x" size={20} color="#000" />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={{padding:16}}>
+                      <TextInput
+                        style={styles.input}
+                        value={tempAvatarUrl}
+                        onChangeText={setTempAvatarUrl}
+                        placeholder="https://ejemplo.com/tu-avatar.jpg"
+                        placeholderTextColor="#657786"
+                      />
+                      <View style={{flexDirection:'row', justifyContent:'flex-end', marginTop:12}}>
+                        <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => setShowUrlModal(false)}>
+                          <Text style={styles.cancelButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={() => {
+                          setEditForm({...editForm, avatar_url: tempAvatarUrl});
+                          setShowUrlModal(false);
+                        }}>
+                          <Text style={styles.saveButtonText}>Usar URL</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              </Modal>
               
               {/* Botones */}
               <View style={styles.modalButtons}>
@@ -458,6 +577,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerCenter: {
+    flex: 1,
     alignItems: 'center',
   },
   headerTitle: {
@@ -469,9 +589,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#657786',
     marginTop: 2,
-  },
-  headerRight: {
-    width: 40,
   },
   scrollView: {
     flex: 1,
@@ -526,6 +643,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#14171A',
     lineHeight: 20,
+    marginBottom: 12,
+  },
+  noBio: {
+    fontSize: 15,
+    color: '#657786',
+    fontStyle: 'italic',
     marginBottom: 12,
   },
   additionalInfo: {

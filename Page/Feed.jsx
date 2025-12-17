@@ -5,7 +5,6 @@ import {
   FlatList,
   StyleSheet,
   RefreshControl,
-  Alert,
   ActivityIndicator,
   TouchableOpacity
 } from 'react-native';
@@ -23,66 +22,47 @@ const Feed = () => {
   const getToken = useCallback(async () => {
     try {
       const usuarioString = await AsyncStorage.getItem('usuario');
-      if (!usuarioString) {
-        console.log('❌ [Feed] No se encontró usuario en AsyncStorage');
-        return null;
-      }
-      
+      if (!usuarioString) return null;
+
       const usuario = JSON.parse(usuarioString);
-      const token = usuario.token;
-      
-      console.log('🔐 [Feed] Token obtenido:', token ? `✅ (${token.length} chars)` : '❌ NO');
-      
-      return token;
-    } catch (error) {
-      console.error('❌ [Feed] Error obteniendo token:', error);
+      return usuario.token || null;
+    } catch {
       return null;
     }
   }, []);
 
   const fetchTweets = useCallback(async () => {
     try {
-      console.log('🔍 [Feed] Obteniendo token...');
       const token = await getToken();
-      
+
       if (!token) {
-        console.error('❌ [Feed] No hay token disponible');
-        setError('No estás autenticado. Por favor, inicia sesión.');
+        setError('Debes iniciar sesión para ver los tweets.');
         setTweets([]);
         return;
       }
 
-      console.log('📡 [Feed] Solicitando tweets...');
       const response = await fetchTweetsAPI(token);
-      
-      console.log('📨 [Feed] Respuesta:', response.ok ? 'OK' : 'ERROR');
-      
+
       if (response.ok) {
-        console.log(`✅ [Feed] ${response.tweets.length} tweets recibidos`);
-        
-        // Obtener usuario actual para marcar tweets propios
         const usuarioString = await AsyncStorage.getItem('usuario');
         const usuario = usuarioString ? JSON.parse(usuarioString) : null;
-        
-        // Procesar tweets
+
         const processedTweets = response.tweets.map(tweet => ({
           ...tweet,
           isOwnTweet: usuario ? tweet.user?.id === usuario.id : false
         }));
-        
+
         setTweets(processedTweets);
         setError(null);
       } else {
-        console.error('❌ [Feed] Error:', response.message);
-        setError(response.message || 'Error al obtener tweets');
-        
         if (response.status === 401) {
-          setError('Sesión expirada. Vuelve a iniciar sesión.');
+          setError('Tu sesión ha expirado. Inicia sesión nuevamente.');
+        } else {
+          setError(response.message || 'No se pudieron cargar los tweets.');
         }
       }
-    } catch (error) {
-      console.error('❌ [Feed] Error en fetchTweets:', error.message);
-      setError('Error de conexión');
+    } catch {
+      setError('Error de conexión. Inténtalo más tarde.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -114,7 +94,7 @@ const Feed = () => {
   if (error && tweets.length === 0) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>⚠️ {error}</Text>
+        <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity onPress={fetchTweets} style={styles.retryButton}>
           <Text style={styles.retryText}>Reintentar</Text>
         </TouchableOpacity>
@@ -125,7 +105,7 @@ const Feed = () => {
   return (
     <View style={styles.container}>
       <CreateTweet onTweetCreated={fetchTweets} />
-      
+
       <FlatList
         data={tweets}
         keyExtractor={(item) => item.id.toString()}
@@ -146,7 +126,9 @@ const Feed = () => {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No hay tweets todavía</Text>
-            <Text style={styles.emptySubtext}>Sé el primero en twittear</Text>
+            <Text style={styles.emptySubtext}>
+              Sé el primero en publicar
+            </Text>
           </View>
         }
         ListFooterComponent={
@@ -158,11 +140,15 @@ const Feed = () => {
             </View>
           ) : null
         }
-        showsVerticalScrollIndicator={true}
+        showsVerticalScrollIndicator
       />
     </View>
   );
 };
+
+export default Feed;
+
+/* ================== ESTILOS ================== */
 
 const styles = StyleSheet.create({
   container: {
@@ -189,7 +175,8 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     marginTop: 10,
-    padding: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     backgroundColor: '#1DA1F2',
     borderRadius: 20,
   },
@@ -223,5 +210,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-
-export default Feed;

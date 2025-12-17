@@ -32,7 +32,6 @@ function CommentSection({ tweetId, onCommentAdded }) {
     console.log('💬 [CommentSection] Inicializado con:', {
       tweetId,
       tieneToken: !!token,
-      tokenLength: token?.length,
       usuario: user?.username
     });
 
@@ -53,22 +52,30 @@ function CommentSection({ tweetId, onCommentAdded }) {
       const data = await getComments(tweetId);
       console.log('✅ [CommentSection] Comentarios recibidos:', data.length);
 
-      // Normalizar: si la respuesta no trae el nombre del usuario pero
-      // el comentario pertenece al usuario autenticado, usar sus datos.
+      // Normalizar comentarios
       const normalized = (data || []).map(c => {
-        const matchesCurrentUser = user && (
-          c.user_id === user.id || c.user_id === user._id || c.user === user.id || c.user === user._id
+        // Verificar si el comentario es del usuario actual
+        const userMatches = user && (
+          c.user_id === user.id || 
+          c.user_id === user._id || 
+          c.user === user.id || 
+          c.user === user._id ||
+          (c.user && (c.user.id === user.id || c.user._id === user._id))
         );
 
-        if (matchesCurrentUser) {
-          return {
-            ...c,
-            username: user.username || user.nombre || user.name || c.username || 'usuario',
-            avatar_url: c.avatar_url || user.avatar || user.avatar_url || c.avatar || 'https://via.placeholder.com/40'
-          };
-        }
-
-        return c;
+        return {
+          id: c.id || c._id,
+          _id: c._id || c.id,
+          content: c.content || c.contenido || '',
+          user_id: c.user_id || c.usuario?._id || c.usuario?.id || c.user?.id || c.user?._id,
+          username: c.username || c.usuario?.username || c.usuario?.usuario || c.user?.username || 'usuario',
+          avatar_url: c.avatar_url || c.usuario?.avatar || c.usuario?.avatar_url || c.user?.avatar_url || c.user?.avatar || 'https://via.placeholder.com/40',
+          created_at: c.created_at || c.createdAt,
+          editado: c.editado || c.edited || false,
+          liked: c.liked || false,
+          likesCount: c.likesCount || c.likes?.length || 0,
+          user: c.usuario || c.user || {}
+        };
       });
 
       setComments(normalized);
@@ -76,7 +83,6 @@ function CommentSection({ tweetId, onCommentAdded }) {
     } catch (error) {
       console.error("❌ [CommentSection] Error cargando comentarios:", error);
       
-      // Mostrar alerta solo si no es un error de red o 404 esperado
       if (error.message && !error.message.includes('Network Error') && error.status !== 404) {
         Alert.alert('Error', 'No se pudieron cargar los comentarios');
       }
@@ -86,66 +92,71 @@ function CommentSection({ tweetId, onCommentAdded }) {
     }
   };
 
+  // ✅ CORREGIDO: Función para crear comentario
   const handleSubmit = async () => {
-    if (!newComment.trim() || submitting) return;
-
-    // Validación de token
-    if (!token) {
-      Alert.alert('Error', 'No estás autenticado. Inicia sesión para comentar.');
+    if (!newComment.trim()) {
+      Alert.alert('Error', 'El comentario no puede estar vacío');
       return;
     }
 
-    if (!tweetId) {
-      Alert.alert('Error', 'No se puede comentar sin un tweet válido.');
+    if (!token) {
+      Alert.alert('Error', 'Debes iniciar sesión para comentar');
+      return;
+    }
+
+    if (!user) {
+      Alert.alert('Error', 'Usuario no identificado');
       return;
     }
 
     setSubmitting(true);
     try {
-      console.log('📝 [CommentSection] Creando comentario con:', {
-        tweetId,
-        tokenLength: token?.length,
-        tieneToken: !!token,
-        contenido: newComment.substring(0, 50)
-      });
+      console.log('📤 [CommentSection] Creando comentario...');
       
-      const result = await createComment(tweetId, newComment, token);
+      const result = await createComment(tweetId, newComment.trim(), token);
       
-      console.log('✅ [CommentSection] Resultado creación:', result);
+      console.log('✅ [CommentSection] Resultado:', result);
       
-      if (result.ok) {
-        // Refrescar comentarios
-        await fetchComments();
-        setNewComment('');
-        Alert.alert('Éxito', result.message || 'Comentario publicado');
+      if (result.ok || result.success) {
+        // Crear objeto de comentario para agregar a la lista
+        const newCommentObj = {
+          id: result.comment?.id || result.comment?._id,
+          _id: result.comment?._id || result.comment?.id,
+          content: newComment.trim(),
+          contenido: newComment.trim(),
+          user_id: user.id || user._id,
+          username: user.username || user.usuario || 'usuario',
+          avatar_url: user.avatar_url || user.avatar || 'https://via.placeholder.com/40',
+          created_at: new Date().toISOString(),
+          editado: false,
+          liked: false,
+          likesCount: 0,
+          user: user
+        };
         
-        // Notificar al componente padre si es necesario
+        // Agregar al principio de la lista
+        setComments(prev => [newCommentObj, ...prev]);
+        setNewComment('');
+        
+        // Notificar al componente padre
         if (onCommentAdded) {
           onCommentAdded();
         }
+        
+        Alert.alert('Éxito', 'Comentario publicado');
       } else {
         Alert.alert('Error', result.message || 'No se pudo publicar el comentario');
       }
-      
     } catch (error) {
-      console.error("❌ [CommentSection] Error publicando comentario:", error);
+      console.error("❌ [CommentSection] Error creando comentario:", error);
       
-      // Mensajes de error específicos
       let errorMessage = 'No se pudo publicar el comentario';
-      
       if (error.status === 401) {
         errorMessage = 'Tu sesión ha expirado. Vuelve a iniciar sesión.';
       } else if (error.status === 404) {
-        errorMessage = 'El tweet no existe o fue eliminado';
-      } else if (error.status === 400) {
-        errorMessage = error.message || 'Error de validación';
-        if (error.errors && error.errors.length > 0) {
-          errorMessage = error.errors[0];
-        }
-      } else if (error.message?.includes('Token') || error.message?.includes('autenticación')) {
-        errorMessage = 'Error de autenticación. Vuelve a iniciar sesión.';
-      } else if (error.message?.includes('conexión') || error.message?.includes('internet')) {
-        errorMessage = 'Error de conexión. Verifica tu internet.';
+        errorMessage = 'Tweet no encontrado';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
       
       Alert.alert('Error', errorMessage);
@@ -165,23 +176,32 @@ function CommentSection({ tweetId, onCommentAdded }) {
   };
 
   const handleUpdate = async (commentId) => {
-    if (!editContent.trim()) return;
+    if (!editContent.trim()) {
+      Alert.alert('Error', 'El comentario no puede estar vacío');
+      return;
+    }
     
-    // Validación de token
     if (!token) {
       Alert.alert('Error', 'No estás autenticado');
       return;
     }
     
     try {
+      console.log('✏️ [CommentSection] Actualizando comentario:', commentId);
+      
       const result = await updateComment(tweetId, commentId, editContent, token);
       
       console.log('✅ [CommentSection] Resultado actualización:', result);
       
-      if (result.ok) {
+      if (result.ok || result.success) {
         // Actualizar estado local
         setComments(comments.map(c => 
-          c.id === commentId ? result.comment : c
+          c.id === commentId ? {
+            ...c,
+            content: editContent,
+            contenido: editContent,
+            editado: true
+          } : c
         ));
         setEditingCommentId(null);
         Alert.alert('Éxito', result.message || 'Comentario actualizado');
@@ -198,6 +218,8 @@ function CommentSection({ tweetId, onCommentAdded }) {
         errorMessage = 'No autorizado para editar este comentario';
       } else if (error.status === 404) {
         errorMessage = 'Comentario no encontrado';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
       
       Alert.alert('Error', errorMessage);
@@ -216,15 +238,21 @@ function CommentSection({ tweetId, onCommentAdded }) {
           onPress: async () => {
             setDeletingCommentId(commentId);
             try {
-              await deleteComment(tweetId, commentId, token);
+              const result = await deleteComment(tweetId, commentId, token);
               
-              // Eliminar del estado local
-              setComments(comments.filter(c => c.id !== commentId));
-              Alert.alert('Éxito', 'Comentario eliminado');
+              console.log('✅ [CommentSection] Resultado eliminación:', result);
               
-              // Notificar al componente padre si es necesario
-              if (onCommentAdded) {
-                onCommentAdded();
+              if (result.ok || result.success) {
+                // Eliminar del estado local
+                setComments(comments.filter(c => c.id !== commentId));
+                Alert.alert('Éxito', result.message || 'Comentario eliminado');
+                
+                // Notificar al componente padre si es necesario
+                if (onCommentAdded) {
+                  onCommentAdded();
+                }
+              } else {
+                Alert.alert('Error', result.message || 'No se pudo eliminar el comentario');
               }
             } catch (error) {
               console.error("❌ [CommentSection] Error eliminando comentario:", error);
@@ -236,6 +264,8 @@ function CommentSection({ tweetId, onCommentAdded }) {
                 errorMessage = 'No autorizado para eliminar este comentario';
               } else if (error.status === 404) {
                 errorMessage = 'Comentario no encontrado';
+              } else if (error.message) {
+                errorMessage = error.message;
               }
               
               Alert.alert('Error', errorMessage);
@@ -258,7 +288,9 @@ function CommentSection({ tweetId, onCommentAdded }) {
     try {
       const result = await toggleCommentLike(tweetId, commentId, token);
       
-      if (result.ok) {
+      console.log('✅ [CommentSection] Resultado like:', result);
+      
+      if (result.ok || result.success) {
         // Actualizar estado local
         setComments(comments.map(c => {
           if (c.id === commentId) {
@@ -274,6 +306,13 @@ function CommentSection({ tweetId, onCommentAdded }) {
       }
     } catch (error) {
       console.error("❌ [CommentSection] Error dando like:", error);
+      
+      let errorMessage = 'No se pudo dar like al comentario';
+      if (error.status === 401) {
+        errorMessage = 'Tu sesión ha expirado';
+      }
+      
+      Alert.alert('Error', errorMessage);
     } finally {
       setLikingCommentId(null);
     }
@@ -319,19 +358,10 @@ function CommentSection({ tweetId, onCommentAdded }) {
 
   return (
     <View style={styles.container}>
-      {/* DEPURACIÓN - Solo en desarrollo */}
-      {__DEV__ && (
-        <View style={styles.debugInfo}>
-          <Text style={styles.debugText}>Tweet ID: {tweetId || 'No disponible'}</Text>
-          <Text style={styles.debugText}>Token: {token ? '✅ Disponible' : '❌ No disponible'}</Text>
-          <Text style={styles.debugText}>Comentarios: {comments.length}</Text>
-        </View>
-      )}
-
       {/* Comment Form */}
       <View style={styles.formContainer}>
         <Image 
-          source={{ uri: user?.avatar || user?.avatar_url || 'https://via.placeholder.com/40' }} 
+          source={{ uri: user?.avatar_url || user?.avatar || 'https://via.placeholder.com/40' }} 
           style={styles.avatar}
         />
         <View style={styles.inputContainer}>
@@ -401,7 +431,7 @@ function CommentSection({ tweetId, onCommentAdded }) {
             <View key={comment.id} style={styles.commentContainer}>
               <Image 
                 source={{ 
-                  uri: comment.avatar_url || comment.user?.avatar || 'https://via.placeholder.com/40' 
+                  uri: comment.avatar_url || 'https://via.placeholder.com/40' 
                 }} 
                 style={styles.commentAvatar}
               />
@@ -409,7 +439,7 @@ function CommentSection({ tweetId, onCommentAdded }) {
                 <View style={styles.commentHeader}>
                   <View style={styles.commentUserInfo}>
                     <Text style={styles.commentUsername}>
-                      @{comment.username || comment.user?.username || 'usuario'}
+                      @{comment.username}
                     </Text>
                     <Text style={styles.commentTime}>
                       {formatTime(comment.created_at)}
@@ -445,7 +475,7 @@ function CommentSection({ tweetId, onCommentAdded }) {
                     </TouchableOpacity>
                     
                     {/* Edit/Delete (solo para dueño) */}
-                    {user && user.id === comment.user_id && editingCommentId !== comment.id && (
+                    {user && (user.id === comment.user_id || user._id === comment.user_id) && editingCommentId !== comment.id && (
                       <>
                         <TouchableOpacity 
                           onPress={() => startEditing(comment)}
@@ -508,26 +538,13 @@ function CommentSection({ tweetId, onCommentAdded }) {
   );
 }
 
+// ✅ ESTILOS (mantén los mismos que ya tienes)
 const styles = StyleSheet.create({
   container: {
     borderTopWidth: 1,
     borderTopColor: '#E1E8ED',
     paddingTop: 16,
     backgroundColor: '#fff',
-  },
-  debugInfo: {
-    backgroundColor: '#F5F8FA',
-    padding: 8,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-  },
-  debugText: {
-    fontSize: 11,
-    color: '#657786',
-    fontFamily: 'monospace',
   },
   loadingContainer: {
     padding: 20,

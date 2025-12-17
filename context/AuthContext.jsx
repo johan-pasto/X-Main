@@ -16,64 +16,136 @@ export const AuthProvider = ({ children }) => {
   const loadUserData = async () => {
     try {
       const usuarioString = await AsyncStorage.getItem('usuario');
+      console.log('📥 AuthContext - Datos cargados de AsyncStorage:', usuarioString);
+      
       if (usuarioString) {
         const stored = JSON.parse(usuarioString);
-
-        // Normalizar posibles formas: { usuario: {...}, token }, { user: {...}, token }, o {...user..., token}
-        const userObj = stored.usuario || stored.user || stored;
-        const tokenVal = stored.token || userObj?.token || null;
-
+        console.log('📦 Datos parseados:', stored);
+        
+        // NORMALIZACIÓN MEJORADA
+        let userObj = null;
+        let tokenVal = null;
+        
+        // Caso 1: Datos del nuevo backend (con transformación de Inicio.jsx)
+        if (stored.user) {
+          userObj = stored.user;
+          tokenVal = stored.token || userObj.token;
+        }
+        // Caso 2: Datos directos del backend antiguo
+        else if (stored.usuario) {
+          // Transformar datos del backend al formato del frontend
+          userObj = transformBackendToFrontend(stored.usuario);
+          tokenVal = stored.token;
+        }
+        // Caso 3: Datos ya en formato user
+        else if (stored._id || stored.id || stored.username) {
+          userObj = stored;
+          tokenVal = stored.token;
+        }
+        
+        console.log('🔄 Usuario normalizado:', userObj);
+        console.log('🔐 Token normalizado:', tokenVal);
+        
         setUser(userObj);
         setToken(tokenVal);
       }
     } catch (error) {
-      console.error('Error cargando datos de usuario:', error);
+      console.error('❌ Error cargando datos de usuario:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // En AuthContext.js, modifica la función login:
-const login = async (userData) => {
-  try {
-    console.log('📥 AuthContext - Datos recibidos del login:', userData);
+  // Función para transformar datos del backend al frontend
+  const transformBackendToFrontend = (backendUser) => {
+    console.log('🔄 Transformando backend -> frontend:', backendUser);
     
-    // ✅ Transformar _id de ObjectId a string si es necesario
-    let userId = userData._id;
-    
-    if (userId && typeof userId === 'object') {
-      // Si _id es un ObjectId de MongoDB
-      if (userId.toString) {
-        userId = userId.toString();
-        console.log('🔄 _id convertido de ObjectId a string:', userId);
-      }
-    }
-    
-    const userToStore = {
-      _id: userId || userData._id,
-      id: userId || userData._id, // Para compatibilidad
-      nombre: userData.nombre,
-      usuario: userData.usuario,
-      email: userData.email,
-      token: userData.token,
-      telefono: userData.telefono || '',
-      membresia: userData.membresia || 'Usuario',
-      creadoEn: userData.creadoEn,
-      ultimoLogin: userData.ultimoLogin,
-      activo: userData.activo !== undefined ? userData.activo : true
+    return {
+      // IDs
+      id: backendUser.id?.toString() || backendUser._id?.toString() || '',
+      _id: backendUser._id?.toString() || backendUser.id?.toString() || '',
+      
+      // Información principal (mapeo backend → frontend)
+      username: backendUser.usuario || backendUser.username || '',
+      name: backendUser.nombre || backendUser.name || '',
+      
+      // Información personal
+      email: backendUser.email || '',
+      telefono: backendUser.telefono || '',
+      membresia: backendUser.membresia || 'Usuario',
+      
+      // Perfil
+      bio: backendUser.bio || '',
+      avatar_url: backendUser.avatar_url || backendUser.avatar || '',
+      location: backendUser.ubicacion || backendUser.location || '',
+      website: backendUser.sitio_web || backendUser.website || '',
+      
+      // Fechas
+      creadoEn: backendUser.creadoEn || backendUser.created_at,
+      ultimoLogin: backendUser.ultimoLogin || new Date().toISOString(),
+      activo: backendUser.activo !== undefined ? backendUser.activo : true,
+      
+      // Mantener compatibilidad con backend
+      usuario: backendUser.usuario || '', // Mantener campo original
+      nombre: backendUser.nombre || ''    // Mantener campo original
     };
-    
-    console.log('💾 Guardando usuario en AsyncStorage:', userToStore);
-    await AsyncStorage.setItem('usuario', JSON.stringify(userToStore));
-    setUser(userToStore);
-    setToken(userData.token);
-    
-  } catch (error) {
-    console.error('Error guardando datos de usuario:', error);
-  }
-};
+  };
+
+  const login = async (userData) => {
+    try {
+      console.log('📥 AuthContext.login - Datos recibidos:', userData);
+      
+      // Determinar qué estructura tiene userData
+      let userToTransform = null;
+      let tokenToStore = null;
+      
+      if (userData.user) {
+        // Datos ya transformados por Inicio.jsx
+        userToTransform = userData.user;
+        tokenToStore = userData.token || userData.user.token;
+      } else if (userData.usuario) {
+        // Datos directos del backend
+        userToTransform = userData.usuario;
+        tokenToStore = userData.token;
+      } else {
+        // Datos mixtos
+        userToTransform = userData;
+        tokenToStore = userData.token;
+      }
+      
+      // Transformar siempre para consistencia
+      const transformedUser = transformBackendToFrontend(userToTransform);
+      transformedUser.token = tokenToStore;
+      
+      console.log('💾 AuthContext - Guardando usuario transformado:', {
+        username: transformedUser.username,
+        name: transformedUser.name,
+        id: transformedUser.id,
+        token: !!tokenToStore
+      });
+      
+      // Guardar en AsyncStorage
+      const dataToStore = {
+        user: transformedUser,
+        token: tokenToStore
+      };
+      
+      await AsyncStorage.setItem('usuario', JSON.stringify(dataToStore));
+      
+      // Actualizar estado
+      setUser(transformedUser);
+      setToken(tokenToStore);
+      
+      console.log('✅ AuthContext - Login completado exitosamente');
+      
+    } catch (error) {
+      console.error('❌ Error en AuthContext.login:', error);
+    }
+  };
+
   const logout = async () => {
     try {
+      console.log('🚪 AuthContext - Cerrando sesión');
       await AsyncStorage.removeItem('usuario');
       setUser(null);
       setToken(null);
@@ -83,6 +155,7 @@ const login = async (userData) => {
   };
 
   const updateToken = (newToken) => {
+    console.log('🔄 AuthContext - Actualizando token');
     setToken(newToken);
 
     // Actualizar token en AsyncStorage manteniendo la estructura original
@@ -92,8 +165,9 @@ const login = async (userData) => {
         if (raw) {
           const parsed = JSON.parse(raw);
           parsed.token = newToken;
-          if (parsed.usuario) parsed.usuario.token = newToken;
-          if (parsed.user) parsed.user.token = newToken;
+          if (parsed.user) {
+            parsed.user.token = newToken;
+          }
           await AsyncStorage.setItem('usuario', JSON.stringify(parsed));
         }
       } catch (e) {
@@ -107,6 +181,21 @@ const login = async (userData) => {
     }
   };
 
+  // Función para debug
+  const debugAuthState = () => {
+    console.log('🔍 AuthContext State Debug:');
+    console.log('User:', user);
+    console.log('Token:', token);
+    console.log('Loading:', loading);
+    
+    return {
+      user,
+      token,
+      loading,
+      isAuthenticated: !!token && !!user
+    };
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -115,7 +204,8 @@ const login = async (userData) => {
         loading,
         login,
         logout,
-        updateToken
+        updateToken,
+        debugAuthState // Para debugging
       }}
     >
       {children}
